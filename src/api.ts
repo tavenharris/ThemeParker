@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { supabase } from './supabase';
 
 export interface Park {
@@ -39,25 +40,44 @@ export interface RideWaitTime {
   showtimes?: Showtime[];
 }
 
+const getApiUrl = (parkId: string) => {
+  const url = `https://api.themeparks.wiki/v1/entity/${parkId}/live`;
+  // Use a reliable CORS proxy for Web. 
+  // We'll use corsproxy.io as it's often more reliable than allorigins for this specific API.
+  return Platform.OS === 'web' ? `https://corsproxy.io/?${encodeURIComponent(url)}` : url;
+};
+
 const logWaitTimesToSupabase = async (parkId: string, rides: RideWaitTime[]) => {
-  if (!process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL === 'YOUR_SUPABASE_URL') {
+  const logs = rides
+    .filter(r => r.entityType === 'ATTRACTION')
+    .map(ride => ({
+      ride_id: ride.id,
+      park_id: parkId,
+      wait_time: ride.queue?.STANDBY?.waitTime || 0,
+      status: ride.status,
+    }));
+
+  if (logs.length === 0) {
     return;
   }
 
-  const logs = rides.filter(r => r.entityType === 'ATTRACTION').map(ride => ({
-    ride_id: ride.id,
-    park_id: parkId,
-    wait_time: ride.queue?.STANDBY?.waitTime || 0,
-    status: ride.status,
-  }));
-
-  if (logs.length === 0) return;
-
   try {
-    const { error } = await supabase.from('wait_times').insert(logs);
-    if (error) console.error(`Error logging ${parkId} to Supabase:`, JSON.stringify(error));
+    const { data, error } = await supabase
+      .from('wait_times')
+      .insert(logs)
+      .select('id');
+    
+    if (error) {
+      if (error.code === '42501') {
+        console.error(`[Supabase] RLS Policy Violation for ${parkId}. Please ensure 'wait_times' table has INSERT policies enabled for public access.`);
+      } else {
+        console.error(`[Supabase] Insert Error [${parkId}]:`, error.message);
+      }
+    } else {
+      console.log(`[Supabase] Successfully logged ${data?.length} wait times for ${parkId}`);
+    }
   } catch (err) {
-    console.error('Supabase catch error:', err);
+    console.error('[Supabase] Catch error:', err);
   }
 };
 
@@ -66,20 +86,25 @@ const logWaitTimesToSupabase = async (parkId: string, rides: RideWaitTime[]) => 
  * This helps build a comprehensive historical dataset regardless of which park the user is viewing.
  */
 export const logAllParksToSupabase = async () => {
-  console.log('Starting background sync for all parks...');
+  console.log('[Sync] Starting background sync for all parks...');
   for (const park of WDW_PARKS) {
     try {
-      const response = await fetch(`https://corsproxy.io/?https://api.themeparks.wiki/v1/entity/${park.id}/live`);
+      // Small delay between requests to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const response = await fetch(getApiUrl(park.id));
       if (response.ok) {
         const data = await response.json();
-        const items = data.liveData.filter((item: RideWaitTime) => item.entityType === 'ATTRACTION');
+        const items = data.liveData?.filter((item: RideWaitTime) => item.entityType === 'ATTRACTION') || [];
         await logWaitTimesToSupabase(park.id, items);
+      } else {
+        console.error(`[Sync] API response not OK for ${park.name}: ${response.status}`);
       }
     } catch (err) {
-      console.error(`Failed to background sync ${park.name}:`, err);
+      console.error(`[Sync] Failed to background sync ${park.name}:`, err);
     }
   }
-  console.log('Background sync complete.');
+  console.log('[Sync] Background sync complete.');
 };
 
 export interface HourlyAverage {
@@ -88,16 +113,16 @@ export interface HourlyAverage {
 }
 
 export const getHistoricalWaitTimes = async (rideId: string): Promise<HourlyAverage[]> => {
-  if (!process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL === 'YOUR_SUPABASE_URL') {
-    return [];
-  }
-
   try {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
     const { data, error } = await supabase
       .from('wait_times')
       .select('wait_time, created_at')
       .eq('ride_id', rideId)
-      .eq('status', 'OPERATING');
+      .eq('status', 'OPERATING')
+      .gte('created_at', thirtyDaysAgo.toISOString());
 
     if (error) throw error;
     if (!data || data.length === 0) return [];
@@ -127,15 +152,15 @@ export const getHistoricalWaitTimes = async (rideId: string): Promise<HourlyAver
 
 export const fetchWaitTimes = async (parkId: string): Promise<RideWaitTime[]> => {
   try {
-    const response = await fetch(`https://corsproxy.io/?https://api.themeparks.wiki/v1/entity/${parkId}/live`);
+    const response = await fetch(getApiUrl(parkId));
     if (!response.ok) {
       throw new Error(`Error fetching wait times: ${response.statusText}`);
     }
     const data = await response.json();
-    const items = data.liveData.filter((item: RideWaitTime) => item.entityType === 'ATTRACTION' || item.entityType === 'SHOW');
+    const items = data.liveData?.filter((item: RideWaitTime) => item.entityType === 'ATTRACTION' || item.entityType === 'SHOW') || [];
     
-    // Asynchronously log to our database for historical tracking
-    logWaitTimesToSupabase(parkId, items);
+    // Log to our database for historical tracking (using await to ensure it completes)
+    await logWaitTimesToSupabase(parkId, items);
     
     return items;
   } catch (error) {

@@ -202,7 +202,7 @@ export const PlanProvider = ({ children }: { children: ReactNode }) => {
             await supabase.from('trip_days').insert(generatedDays.map(d => ({
               trip_id: activeTrip.id,
               date: d.date,
-              park_id: d.park_id
+              park_id: d.parkId
             })));
             setTripDays(generatedDays);
           }
@@ -341,7 +341,7 @@ export const PlanProvider = ({ children }: { children: ReactNode }) => {
       await supabase.from('trip_days').insert(newDays.map(d => ({
         trip_id: activeTripId,
         date: d.date,
-        park_id: d.park_id
+        park_id: d.parkId
       })));
     }
   };

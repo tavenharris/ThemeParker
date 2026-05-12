@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Calendar } from 'react-native-calendars';
 import { WDW_PARKS } from '../../src/api';
 import { usePlan } from '../../src/PlanContext';
 import { useAuth } from '../../src/AuthContext';
@@ -75,40 +77,96 @@ export default function SettingsScreen() {
     updatePreference,
   } = usePlan();
   const { signOut, profile } = useAuth();
-  const [startInput, setStartInput] = useState(tripStartDate);
-  const [endInput, setEndInput] = useState(tripEndDate);
+  
+  const [range, setRange] = useState<{ start?: string; end?: string }>({
+    start: tripStartDate,
+    end: tripEndDate,
+  });
+  
   const [dateError, setDateError] = useState('');
   const [isSigningOut, setIsSigningOut] = useState(false);
 
   useEffect(() => {
-    setStartInput(tripStartDate);
-    setEndInput(tripEndDate);
+    setRange({ start: tripStartDate, end: tripEndDate });
   }, [tripEndDate, tripStartDate]);
 
   const tripDuration = tripDays.length;
 
+  const onDayPress = (day: { dateString: string }) => {
+    const { dateString } = day;
+    
+    if (!range.start || (range.start && range.end)) {
+      // Start new selection
+      setRange({ start: dateString, end: undefined });
+      setDateError('');
+    } else {
+      // Selecting end date
+      if (dateString < range.start) {
+        // If selected date is before start, make it the new start
+        setRange({ start: dateString, end: undefined });
+      } else {
+        const start = new Date(`${range.start}T00:00:00`);
+        const end = new Date(`${dateString}T00:00:00`);
+        const dayCount = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+        
+        if (dayCount > 21) {
+          setDateError('Keep the planning window to 21 days or fewer.');
+          return;
+        }
+        
+        setRange({ ...range, end: dateString });
+        setDateError('');
+      }
+    }
+  };
+
+  const markedDates = useMemo(() => {
+    const marked: any = {};
+    if (range.start) {
+      marked[range.start] = { 
+        startingDay: true, 
+        color: Colors.primary, 
+        textColor: 'white',
+        selected: true 
+      };
+    }
+    if (range.end) {
+      marked[range.end] = { 
+        endingDay: true, 
+        color: Colors.primary, 
+        textColor: 'white',
+        selected: true 
+      };
+      
+      // Fill in between
+      let current = new Date(`${range.start}T00:00:00`);
+      const end = new Date(`${range.end}T00:00:00`);
+      current.setDate(current.getDate() + 1);
+      while (current < end) {
+        const year = current.getFullYear();
+        const month = String(current.getMonth() + 1).padStart(2, '0');
+        const day = String(current.getDate()).padStart(2, '0');
+        const dateString = `${year}-${month}-${day}`;
+        
+        marked[dateString] = { 
+          color: Colors.primaryContainer, 
+          textColor: Colors.onPrimaryContainer,
+          selected: true
+        };
+        current.setDate(current.getDate() + 1);
+      }
+    }
+    return marked;
+  }, [range]);
+
   const handleApplyDates = () => {
-    const start = parseDateInput(startInput);
-    const end = parseDateInput(endInput);
-
-    if (!start || !end) {
-      setDateError('Use YYYY-MM-DD for both trip dates.');
+    if (!range.start || !range.end) {
+      setDateError('Please select a start and end date on the calendar.');
       return;
     }
 
-    if (start > end) {
-      setDateError('The start date must be before the end date.');
-      return;
-    }
-
-    const dayCount = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
-    if (dayCount > 21) {
-      setDateError('Keep the planning window to 21 days or fewer.');
-      return;
-    }
-
-    setDateError('');
-    setTripDates(startInput, endInput);
+    setTripDates(range.start, range.end);
+    Alert.alert('Success', 'Trip dates updated successfully!');
   };
 
   const handleSignOut = async () => {
@@ -153,37 +211,70 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.card}>
-        <View style={styles.dateGrid}>
-          <View style={styles.dateField}>
-            <Text style={styles.inputLabel}>Start Date</Text>
-            <TextInput
-              value={startInput}
-              onChangeText={setStartInput}
-              placeholder="YYYY-MM-DD"
-              autoCapitalize="none"
-              keyboardType="numbers-and-punctuation"
-              style={styles.input}
-            />
+        <View style={styles.calendarContainer}>
+          <Calendar
+            markingType={'period'}
+            markedDates={markedDates}
+            onDayPress={onDayPress}
+            theme={{
+              calendarBackground: 'transparent',
+              textSectionTitleColor: Colors.outline,
+              selectedDayBackgroundColor: Colors.primary,
+              selectedDayTextColor: '#ffffff',
+              todayTextColor: Colors.secondary,
+              dayTextColor: Colors.onSurface,
+              textDisabledColor: Colors.outlineVariant,
+              dotColor: Colors.primary,
+              selectedDotColor: '#ffffff',
+              arrowColor: Colors.primary,
+              monthTextColor: Colors.primary,
+              indicatorColor: Colors.primary,
+              textDayFontFamily: 'System',
+              textMonthFontFamily: 'Georgia',
+              textDayHeaderFontFamily: 'System',
+              textDayFontWeight: '600',
+              textMonthFontWeight: 'bold',
+              textDayHeaderFontWeight: '600',
+              textDayFontSize: 14,
+              textMonthFontSize: 18,
+              textDayHeaderFontSize: 12,
+            }}
+          />
+        </View>
+
+        <View style={styles.rangeInfo}>
+          <View style={styles.dateBlock}>
+            <Text style={styles.dateLabel}>Start</Text>
+            <Text style={styles.dateValue}>{range.start ? formatDate(range.start) : 'Select'}</Text>
           </View>
-          <View style={styles.dateField}>
-            <Text style={styles.inputLabel}>End Date</Text>
-            <TextInput
-              value={endInput}
-              onChangeText={setEndInput}
-              placeholder="YYYY-MM-DD"
-              autoCapitalize="none"
-              keyboardType="numbers-and-punctuation"
-              style={styles.input}
-            />
+          <Ionicons name="arrow-forward" size={16} color={Colors.outline} />
+          <View style={styles.dateBlock}>
+            <Text style={styles.dateLabel}>End</Text>
+            <Text style={styles.dateValue}>{range.end ? formatDate(range.end) : 'Select'}</Text>
           </View>
         </View>
 
         {dateError ? <Text style={styles.errorText}>{dateError}</Text> : null}
 
         <TouchableOpacity style={styles.applyButton} onPress={handleApplyDates} activeOpacity={0.85}>
-          <Ionicons name="calendar" size={18} color={Colors.onSecondaryContainer} />
-          <Text style={styles.applyButtonText}>Update Trip Dates</Text>
+          <LinearGradient
+            colors={[Colors.secondary, Colors.secondaryFixed]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.applyButtonGradient}
+          >
+            <Text style={styles.applyButtonText}>Save Itinerary</Text>
+            <Ionicons name="sparkles" size={18} color={Colors.onSecondaryContainer} />
+          </LinearGradient>
         </TouchableOpacity>
+      </View>
+
+      <View style={styles.sectionHeaderRow}>
+        <View>
+          <Text style={styles.sectionKicker}>Destinations</Text>
+          <Text style={styles.sectionTitle}>Assign Destinations</Text>
+        </View>
+        <Ionicons name="map-outline" size={24} color={Colors.secondary} />
       </View>
 
       <View style={styles.daysList}>
@@ -191,7 +282,7 @@ export default function SettingsScreen() {
           <View key={day.date} style={[styles.dayCard, { borderLeftColor: PARK_ACCENTS[day.parkId] ?? Colors.primary }]}> 
             <View style={styles.dayHeader}>
               <View style={styles.dayIcon}>
-                <Ionicons name="sparkles" size={18} color={Colors.primary} />
+                <Ionicons name="calendar-outline" size={18} color={Colors.primary} />
               </View>
               <View>
                 <Text style={styles.dayDate}>{formatDate(day.date)}</Text>
@@ -216,6 +307,9 @@ export default function SettingsScreen() {
             </ScrollView>
           </View>
         ))}
+        {tripDays.length === 0 && (
+          <Text style={styles.emptyText}>Select trip dates above to start planning your days.</Text>
+        )}
       </View>
 
       <Text style={styles.sectionTitle}>App Preferences</Text>
@@ -437,50 +531,60 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(212, 175, 55, 0.22)',
     borderRadius: 20,
     padding: 16,
-    marginBottom: 14,
+    marginBottom: 28,
     shadowColor: Colors.primary,
     shadowOpacity: 0.08,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
     elevation: 3,
   },
-  dateGrid: {
+  calendarContainer: {
+    marginBottom: 16,
+  },
+  rangeInfo: {
     flexDirection: 'row',
-    gap: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 20,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.outlineVariant,
+    marginTop: 8,
   },
-  dateField: {
-    flex: 1,
+  dateBlock: {
+    alignItems: 'center',
   },
-  inputLabel: {
+  dateLabel: {
     color: Colors.outline,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 0.6,
     textTransform: 'uppercase',
-    marginBottom: 8,
+    letterSpacing: 0.5,
   },
-  input: {
-    backgroundColor: Colors.surfaceContainerLow,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-    color: Colors.onSurface,
+  dateValue: {
+    color: Colors.primary,
     fontSize: 15,
     fontWeight: '700',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
   },
   errorText: {
     color: Colors.error,
     fontSize: 13,
     fontWeight: '600',
     marginTop: 10,
+    textAlign: 'center',
   },
   applyButton: {
     marginTop: 14,
-    backgroundColor: Colors.secondaryContainer,
     borderRadius: 16,
-    paddingVertical: 13,
+    overflow: 'hidden',
+    shadowColor: Colors.secondary,
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  applyButtonGradient: {
+    paddingVertical: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -555,6 +659,13 @@ const styles = StyleSheet.create({
   },
   parkChipTextActive: {
     color: Colors.onPrimaryContainer,
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: Colors.onSurfaceVariant,
+    fontStyle: 'italic',
+    marginTop: 20,
+    paddingHorizontal: 40,
   },
   cardGroup: {
     backgroundColor: Colors.surfaceContainerLowest,
