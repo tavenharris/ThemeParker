@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, ReactNode, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RideWaitTime, WDW_PARKS } from './api';
 import { supabase } from './supabase';
@@ -180,7 +180,11 @@ export const PlanProvider = ({ children }: { children: ReactNode }) => {
             .select()
             .single();
           
-          if (createError) throw createError;
+          if (createError) {
+            console.error('Error creating trip:', createError);
+            setIsLoading(false);
+            return;
+          }
           activeTrip = newTrip;
         } else {
           activeTrip = trips[0];

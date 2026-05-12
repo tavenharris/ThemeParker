@@ -4,9 +4,9 @@ import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Switch, Text, 
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Calendar } from 'react-native-calendars';
-import { WDW_PARKS } from '../../src/api';
-import { usePlan } from '../../src/PlanContext';
-import { useAuth } from '../../src/AuthContext';
+import { WDW_PARKS } from '@/src/api';
+import { usePlan } from '@/src/PlanContext';
+import { useAuth } from '@/src/AuthContext';
 
 const Colors = {
   primary: '#021541',
@@ -56,15 +56,6 @@ const formatParkName = (name: string) => name
   .replace('Disney\'s ', '')
   .replace(' Theme Park', '')
   .replace(' Park', '');
-
-const parseDateInput = (value: string) => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return null;
-  }
-
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? null : date;
-};
 
 export default function SettingsScreen() {
   const {

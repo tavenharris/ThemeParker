@@ -124,7 +124,10 @@ export const getHistoricalWaitTimes = async (rideId: string): Promise<HourlyAver
       .eq('status', 'OPERATING')
       .gte('created_at', thirtyDaysAgo.toISOString());
 
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase error fetching historical data:', error);
+      return [];
+    }
     if (!data || data.length === 0) return [];
 
     const hourlyWaits: Record<number, number[]> = {};
@@ -154,7 +157,8 @@ export const fetchWaitTimes = async (parkId: string): Promise<RideWaitTime[]> =>
   try {
     const response = await fetch(getApiUrl(parkId));
     if (!response.ok) {
-      throw new Error(`Error fetching wait times: ${response.statusText}`);
+      console.error(`Error fetching wait times: ${response.statusText}`);
+      return [];
     }
     const data = await response.json();
     const items = data.liveData?.filter((item: RideWaitTime) => item.entityType === 'ATTRACTION' || item.entityType === 'SHOW') || [];
