@@ -238,13 +238,45 @@ const BreakModal = ({ isVisible, onClose, onAdd }: { isVisible: boolean, onClose
   );
 };
 
+const DateSelector = ({ tripDays, selectedDate, onSelectDate }: { tripDays: any[], selectedDate: string, onSelectDate: (date: string) => void }) => (
+  <View style={styles.dateSelectorContainer}>
+    <Text style={styles.dateSelectorLabel}>Planning for:</Text>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateSelectorScroll}>
+      {tripDays.map((day, index) => (
+        <TouchableOpacity
+          key={day.date}
+          style={[styles.dateTab, selectedDate === day.date && styles.dateTabActive]}
+          onPress={() => onSelectDate(day.date)}
+        >
+          <Text style={[styles.dateTabText, selectedDate === day.date && styles.dateTabTextActive]}>
+            Day {index + 1}: {formatTripDate(day.date)}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </ScrollView>
+  </View>
+);
+
 export default function PlanScreen() {
-  const { plannedRides, removeRide, plannedBreaks, addBreak, removeBreak, tripDays } = usePlan();
+  const { 
+    plannedRides, 
+    removeRide, 
+    plannedBreaks, 
+    addBreak, 
+    removeBreak, 
+    tripDays, 
+    isLoading: isContextLoading,
+    selectedDate,
+    setSelectedDate
+  } = usePlan();
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizedPlan, setOptimizedPlan] = useState<any[]>([]);
 
   // Modal Visibility State
   const [isModalVisible, setModalVisible] = useState(false);
+
+  const currentRides = plannedRides.filter(r => r.date === selectedDate);
+  const currentBreaks = plannedBreaks.filter(b => b.date === selectedDate);
 
   // Clear optimized list if a ride or break is removed that was in the optimization
   useEffect(() => {
@@ -252,14 +284,14 @@ export default function PlanScreen() {
       const ridesInOpt = optimizedPlan.filter(r => !r.isBreak);
       const breaksInOpt = optimizedPlan.filter(r => r.isBreak);
       
-      const ridesStillValid = ridesInOpt.every(optRide => plannedRides.some(pr => pr.id === optRide.id));
-      const breaksStillValid = breaksInOpt.every(optBreak => plannedBreaks.some(pb => pb.id === optBreak.id));
+      const ridesStillValid = ridesInOpt.every(optRide => currentRides.some(pr => pr.id === optRide.id));
+      const breaksStillValid = breaksInOpt.every(optBreak => currentBreaks.some(pb => pb.id === optBreak.id));
       
-      if (!ridesStillValid || !breaksStillValid || ridesInOpt.length !== plannedRides.length || breaksInOpt.length !== plannedBreaks.length) {
+      if (!ridesStillValid || !breaksStillValid || ridesInOpt.length !== currentRides.length || breaksInOpt.length !== currentBreaks.length) {
         setOptimizedPlan([]); // Reset if mismatch
       }
     }
-  }, [plannedRides, plannedBreaks]);
+  }, [plannedRides, plannedBreaks, selectedDate]);
 
   const handleAddBreak = (type: string, time: number, duration: number) => {
     addBreak({
@@ -267,32 +299,32 @@ export default function PlanScreen() {
       name: type === 'Custom' ? 'Break' : `${type} Break`,
       startTimeHour: time,
       durationHours: duration
-    });
+    }, selectedDate);
     setModalVisible(false);
   };
 
   const optimizePlan = async () => {
-    if (plannedRides.length === 0 && plannedBreaks.length === 0) return;
+    if (currentRides.length === 0 && currentBreaks.length === 0) return;
     setIsOptimizing(true);
     setOptimizedPlan([]);
 
     // Fetch history for all rides (ignore shows for wait time history)
     const historyData: Record<string, HourlyAverage[]> = {};
-    for (const ride of plannedRides) {
+    for (const ride of currentRides) {
       if (ride.entityType !== 'SHOW') {
         historyData[ride.id] = await getHistoricalWaitTimes(ride.id);
       }
     }
 
-    const unassignedAttractions = plannedRides.filter(r => r.entityType !== 'SHOW');
-    const shows = plannedRides.filter(r => r.entityType === 'SHOW').map(s => ({
+    const unassignedAttractions = [...currentRides.filter(r => r.entityType !== 'SHOW')];
+    const shows = currentRides.filter(r => r.entityType === 'SHOW').map(s => ({
       ...s,
       scheduledHour: (s as any).selectedShowtimeHour || 15, // default 3 PM if not set
       durationHours: 0.75, // 45 min for show
       isBreak: false
     }));
 
-    const breaks = plannedBreaks.map(b => ({
+    const breaks = currentBreaks.map(b => ({
       ...b,
       scheduledHour: b.startTimeHour,
       isBreak: true
@@ -372,34 +404,46 @@ export default function PlanScreen() {
     setIsOptimizing(false);
   };
 
-  if (plannedRides.length === 0 && plannedBreaks.length === 0) {
+  if (isContextLoading) {
     return (
       <View style={styles.emptyContainer}>
-        <Ionicons name="clipboard-outline" size={64} color={Colors.outlineVariant} />
-        <Text style={styles.emptyText}>Your plan is empty.</Text>
-        <Text style={styles.emptySubtext}>Go to the Wait Times tab to add rides and shows to your priority list!</Text>
-        <TripSummaryCard tripDays={tripDays} />
-        
-        <View style={[styles.breaksContainer, {marginTop: 24}]}>
-          <TouchableOpacity style={styles.addBreakButton} onPress={() => setModalVisible(true)}>
-            <Ionicons name="add-circle-outline" size={20} color={Colors.onPrimary} />
-            <Text style={styles.addBreakButtonText}>Schedule Custom Break</Text>
-          </TouchableOpacity>
-        </View>
-
-        <BreakModal 
-          isVisible={isModalVisible} 
-          onClose={() => setModalVisible(false)} 
-          onAdd={handleAddBreak} 
-        />
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={[styles.emptyText, { marginTop: 12 }]}>Loading your magical plans...</Text>
       </View>
     );
   }
 
-  const displayList = optimizedPlan.length > 0 ? optimizedPlan : [...plannedBreaks.map(b => ({...b, isBreak: true})), ...plannedRides];
+  if (currentRides.length === 0 && currentBreaks.length === 0) {
+    return (
+      <View style={styles.container}>
+        <DateSelector tripDays={tripDays} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+        <View style={styles.emptyContainer}>
+          <Ionicons name="clipboard-outline" size={64} color={Colors.outlineVariant} />
+          <Text style={styles.emptyText}>Your plan for this day is empty.</Text>
+          <Text style={styles.emptySubtext}>Go to the Wait Times tab to add rides and shows to your priority list!</Text>
+          
+          <View style={[styles.breaksContainer, {marginTop: 24}]}>
+            <TouchableOpacity style={styles.addBreakButton} onPress={() => setModalVisible(true)}>
+              <Ionicons name="add-circle-outline" size={20} color={Colors.onPrimary} />
+              <Text style={styles.addBreakButtonText}>Schedule Custom Break</Text>
+            </TouchableOpacity>
+          </View>
+
+          <BreakModal 
+            isVisible={isModalVisible} 
+            onClose={() => setModalVisible(false)} 
+            onAdd={handleAddBreak} 
+          />
+        </View>
+      </View>
+    );
+  }
+
+  const displayList = optimizedPlan.length > 0 ? optimizedPlan : [...currentBreaks.map(b => ({...b, isBreak: true})), ...currentRides];
 
   return (
     <View style={styles.container}>
+      <DateSelector tripDays={tripDays} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
       <BreakModal 
           isVisible={isModalVisible} 
           onClose={() => setModalVisible(false)} 
@@ -421,13 +465,13 @@ export default function PlanScreen() {
               item={item} 
               index={index} 
               isLast={index === displayList.length - 1} 
-              removeRide={removeRide} 
+              removeRide={(id) => removeRide(id, selectedDate)} 
               removeBreak={removeBreak}
             />
           )}
           ListHeaderComponent={() => (
             <View>
-              <TripSummaryCard tripDays={tripDays} />
+              <TripSummaryCard tripDays={tripDays.filter(d => d.date === selectedDate)} />
 
               {/* Add Breaks UI */}
               <View style={styles.breaksContainer}>
@@ -871,5 +915,43 @@ const styles = StyleSheet.create({
     color: Colors.onPrimaryContainer,
     fontWeight: '600',
     fontSize: 16,
-  }
+  },
+  dateSelectorContainer: {
+    backgroundColor: Colors.primary,
+    paddingVertical: 12,
+  },
+  dateSelectorLabel: {
+    color: Colors.secondaryFixedDim,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  dateSelectorScroll: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  dateTab: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  dateTabActive: {
+    backgroundColor: Colors.secondaryContainer,
+    borderColor: Colors.secondaryFixed,
+  },
+  dateTabText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  dateTabTextActive: {
+    color: Colors.primary,
+    fontWeight: '700',
+  },
 });

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, ImageBackground, ScrollView, TextInput, LayoutAnimation, Platform, UIManager } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, ImageBackground, ScrollView, TextInput, LayoutAnimation, Platform, UIManager, RefreshControl } from 'react-native';
 
 if (
   Platform.OS === 'android' &&
@@ -7,7 +7,7 @@ if (
 ) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
-import { WDW_PARKS, fetchWaitTimes, RideWaitTime, Park } from '../../src/api';
+import { WDW_PARKS, fetchWaitTimes, RideWaitTime, Park, logAllParksToSupabase } from '../../src/api';
 import { usePlan } from '../../src/PlanContext';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -36,23 +36,86 @@ const Colors = {
 
 const LAND_COLORS = ['#00A3E0', '#D4AF37', '#4E3629', '#e8e8e8'];
 
+const formatTripDate = (value: string) => {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', weekday: 'short' }).format(date);
+};
+
+const DateSelector = ({ tripDays, selectedDate, onSelectDate }: { tripDays: any[], selectedDate: string, onSelectDate: (date: string) => void }) => (
+  <View style={styles.dateSelectorContainer}>
+    <Text style={styles.dateSelectorLabel}>Planning for:</Text>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateSelectorScroll}>
+      {tripDays.map((day, index) => (
+        <TouchableOpacity
+          key={day.date}
+          style={[styles.dateTab, selectedDate === day.date && styles.dateTabActive]}
+          onPress={() => onSelectDate(day.date)}
+        >
+          <Text style={[styles.dateTabText, selectedDate === day.date && styles.dateTabTextActive]}>
+            Day {index + 1}: {formatTripDate(day.date)}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </ScrollView>
+  </View>
+);
+
 export default function WaitTimesScreen() {
+  const { addRide, isPlanned, removeRide, tripDays, selectedDate, setSelectedDate, updateTripDayPark } = usePlan();
   const [selectedPark, setSelectedPark] = useState<Park>(WDW_PARKS[0]);
   const [waitTimes, setWaitTimes] = useState<RideWaitTime[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const { addRide, isPlanned, removeRide } = usePlan();
   const router = useRouter();
+
+  useEffect(() => {
+    // When selectedDate changes, update the selectedPark to match the trip plan
+    const dayPlan = tripDays.find(d => d.date === selectedDate);
+    if (dayPlan) {
+      const park = WDW_PARKS.find(p => p.id === dayPlan.parkId);
+      if (park) setSelectedPark(park);
+    }
+  }, [selectedDate, tripDays]);
 
   useEffect(() => {
     loadWaitTimes();
   }, [selectedPark]);
+
+  // Background sync for ALL parks every 5 minutes while user is using the app
+  useEffect(() => {
+    // Initial sync
+    logAllParksToSupabase();
+
+    const interval = setInterval(() => {
+      logAllParksToSupabase();
+    }, 5 * 60 * 1000); // 5 minutes
+
+    return () => clearInterval(interval);
+  }, []);
 
   const loadWaitTimes = async () => {
     setLoading(true);
     const data = await fetchWaitTimes(selectedPark.id);
     setWaitTimes(data.sort((a, b) => a.name.localeCompare(b.name)));
     setLoading(false);
+  };
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    // Refresh current park AND trigger background sync for all others
+    await Promise.all([
+      loadWaitTimes(),
+      logAllParksToSupabase()
+    ]);
+    setRefreshing(false);
+  }, [selectedPark]);
+
+  const handleParkChange = (park: Park) => {
+    setSelectedPark(park);
+    // Update the trip plan for the selected date to match this park
+    updateTripDayPark(selectedDate, park.id);
   };
 
   const getParkImage = (parkId: string) => {
@@ -77,7 +140,7 @@ export default function WaitTimesScreen() {
   }, [searchQuery, waitTimes, fuse]);
 
   const renderWaitTime = ({ item, index }: { item: RideWaitTime, index: number }) => {
-    const planned = isPlanned(item.id);
+    const planned = isPlanned(item.id, selectedDate);
     const isOperating = item.status === 'OPERATING';
     const isShow = item.entityType === 'SHOW';
     const waitTime = item.queue?.STANDBY?.waitTime || 0;
@@ -117,14 +180,14 @@ export default function WaitTimesScreen() {
         <View style={styles.rideCardFooter}>
           <View style={styles.footerInfo}>
              <Ionicons name="sparkles" size={14} color="#469ec5" style={{ marginRight: 4 }} />
-             <Text style={styles.footerText}>Tap to add to itinerary</Text>
+             <Text style={styles.footerText}>Tap to add to {formatTripDate(selectedDate)}</Text>
           </View>
           <TouchableOpacity
             style={styles.planButton}
             onPress={(e) => { 
               e.stopPropagation(); 
               if (planned) {
-                removeRide(item.id);
+                removeRide(item.id, selectedDate);
               } else {
                 // For shows, try to pick the first upcoming showtime as the default blocked hour
                 let selectedHour;
@@ -133,7 +196,7 @@ export default function WaitTimesScreen() {
                   const st = new Date(upcoming.startTime);
                   selectedHour = st.getHours() + st.getMinutes() / 60;
                 }
-                addRide(item, selectedHour);
+                addRide(item, selectedDate, selectedHour);
               }
             }}
           >
@@ -150,6 +213,8 @@ export default function WaitTimesScreen() {
 
   return (
     <View style={styles.container}>
+      <DateSelector tripDays={tripDays} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+      
       <View style={styles.parkSelector}>
         <FlatList
           horizontal
@@ -160,7 +225,7 @@ export default function WaitTimesScreen() {
           renderItem={({ item }) => (
             <TouchableOpacity
               style={[styles.parkTab, selectedPark.id === item.id && styles.parkTabActive]}
-              onPress={() => setSelectedPark(item)}
+              onPress={() => handleParkChange(item)}
             >
               <Text style={[styles.parkTabText, selectedPark.id === item.id && styles.parkTabTextActive]}>
                 {item.name.replace("Disney's ", "").replace(" Park", "").replace(" Theme Park", "")}
@@ -192,7 +257,18 @@ export default function WaitTimesScreen() {
         )}
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh} 
+            tintColor={Colors.primary}
+            colors={[Colors.primary]}
+          />
+        }
+      >
         
         {/* Hero Section */}
         {!searchQuery && (
@@ -293,6 +369,44 @@ const styles = StyleSheet.create({
   },
   parkTabTextActive: {
     color: Colors.onPrimaryContainer,
+  },
+  dateSelectorContainer: {
+    backgroundColor: Colors.primary,
+    paddingVertical: 12,
+  },
+  dateSelectorLabel: {
+    color: Colors.secondaryFixedDim,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  dateSelectorScroll: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  dateTab: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  dateTabActive: {
+    backgroundColor: Colors.secondaryContainer,
+    borderColor: Colors.secondaryFixed,
+  },
+  dateTabText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  dateTabTextActive: {
+    color: Colors.primary,
+    fontWeight: '700',
   },
   searchContainer: {
     flexDirection: 'row',

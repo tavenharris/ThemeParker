@@ -22,7 +22,7 @@ function TopHeader() {
             style={styles.avatar} 
           />
         </View>
-        <Text style={styles.headerTitle}>Park Guide</Text>
+        <Text style={styles.headerTitle}>Theme Parker</Text>
       </View>
       <Ionicons name="map-outline" size={28} color={Colors.primary} />
     </View>

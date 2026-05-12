@@ -74,7 +74,7 @@ export default function SettingsScreen() {
     preferences,
     updatePreference,
   } = usePlan();
-  const { signOut } = useAuth();
+  const { signOut, profile } = useAuth();
   const [startInput, setStartInput] = useState(tripStartDate);
   const [endInput, setEndInput] = useState(tripEndDate);
   const [dateError, setDateError] = useState('');
@@ -122,18 +122,22 @@ export default function SettingsScreen() {
     }
   };
 
+  const displayName = profile?.full_name || 'Guest User';
+  const displayEmail = profile?.email || 'Sign in to sync your plans';
+  const displayAvatar = profile?.avatar_url || 'https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y';
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <LinearGradient colors={[Colors.primaryContainer, Colors.primary]} style={styles.profileCard}>
         <View style={styles.profileGlow} />
         <Image
-          source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAh6rchMxgTwgHkvnPPP24-v_Phr1NLXL0NbymEgLzwmIzLk5-x-eEU1I8GmbWV_L9kZXi488Bqm_qHdRn9HQHcc9uLf1usZMN3fbfME7p2dqAUrz3WkTxfsB58lPBfmFvww4uadJKeuQmDjGg2gx4frx9hKMivDmYQjh-ek7iXfwTMGizAGgGK6SpcsssxNiIe9qZnxzrHFAwnPJ6fv9nLB2PRRpX7-BN65qGSAwYIsorN6Fel52hhqU9nL3PGxLBxvsAsBeowBYzB' }}
+          source={{ uri: displayAvatar }}
           style={styles.profileImage}
         />
         <View style={styles.profileCopy}>
-          <Text style={styles.profileEyebrow}>Gold Pass Member</Text>
-          <Text style={styles.profileName}>Expert Guide</Text>
-          <Text style={styles.profileMeta}>Orlando, FL · Trip settings and account</Text>
+          <Text style={styles.profileEyebrow}>{profile ? 'Gold Pass Member' : 'Guest mode'}</Text>
+          <Text style={styles.profileName}>{displayName}</Text>
+          <Text style={styles.profileMeta}>{displayEmail}</Text>
         </View>
       </LinearGradient>
 

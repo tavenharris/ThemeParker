@@ -7,12 +7,22 @@ import { supabase } from './supabase';
 
 WebBrowser.maybeCompleteAuthSession();
 
+export type Profile = {
+  id: string;
+  username: string | null;
+  full_name: string | null;
+  avatar_url: string | null;
+  email: string | null;
+};
+
 type AuthContextType = {
   session: Session | null;
+  profile: Profile | null;
   isLoading: boolean;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   completeOAuthSession: (url: string) => Promise<void>;
+  updateProfile: (updates: Partial<Profile>) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -30,23 +40,74 @@ const getParamFromUrl = (url: string, key: string) => {
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  const fetchProfile = useCallback(async (userId: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (error && error.code === 'PGRST116') {
+      // Profile doesn't exist, create it
+      const { data: userData } = await supabase.auth.getUser();
+      if (userData.user) {
+        const newProfile = {
+          id: userId,
+          email: userData.user.email,
+          full_name: userData.user.user_metadata.full_name || userData.user.user_metadata.name,
+          avatar_url: userData.user.user_metadata.avatar_url,
+        };
+        const { data: created, error: createError } = await supabase
+          .from('profiles')
+          .insert(newProfile)
+          .select()
+          .single();
+        
+        if (!createError) setProfile(created);
+      }
+    } else if (!error) {
+      setProfile(data);
+    }
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
+      if (data.session) {
+        fetchProfile(data.session.user.id);
+      }
       setIsLoading(false);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
+      if (nextSession) {
+        fetchProfile(nextSession.user.id);
+      } else {
+        setProfile(null);
+      }
       setIsLoading(false);
     });
 
     return () => {
       listener.subscription.unsubscribe();
     };
-  }, []);
+  }, [fetchProfile]);
+
+  const updateProfile = async (updates: Partial<Profile>) => {
+    if (!session?.user) return;
+
+    const { error } = await supabase
+      .from('profiles')
+      .update(updates)
+      .eq('id', session.user.id);
+
+    if (error) throw error;
+    setProfile(prev => prev ? { ...prev, ...updates } : null);
+  };
 
   const completeOAuthSession = useCallback(async (url: string) => {
     const error = getParamFromUrl(url, 'error_description') ?? getParamFromUrl(url, 'error');
@@ -110,11 +171,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const value = useMemo(() => ({
     session,
+    profile,
     isLoading,
     signInWithGoogle,
     signOut,
     completeOAuthSession,
-  }), [completeOAuthSession, isLoading, session, signInWithGoogle, signOut]);
+    updateProfile,
+  }), [completeOAuthSession, isLoading, profile, session, signInWithGoogle, signOut]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

@@ -41,7 +41,7 @@ export interface RideWaitTime {
 
 const logWaitTimesToSupabase = async (parkId: string, rides: RideWaitTime[]) => {
   if (!process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL === 'YOUR_SUPABASE_URL') {
-    return; // Skip logging if Supabase is not configured
+    return;
   }
 
   const logs = rides.filter(r => r.entityType === 'ATTRACTION').map(ride => ({
@@ -51,12 +51,35 @@ const logWaitTimesToSupabase = async (parkId: string, rides: RideWaitTime[]) => 
     status: ride.status,
   }));
 
+  if (logs.length === 0) return;
+
   try {
     const { error } = await supabase.from('wait_times').insert(logs);
-    if (error) console.error('Error logging to Supabase:', JSON.stringify(error));
+    if (error) console.error(`Error logging ${parkId} to Supabase:`, JSON.stringify(error));
   } catch (err) {
     console.error('Supabase catch error:', err);
   }
+};
+
+/**
+ * Fetches and logs wait times for ALL parks to Supabase.
+ * This helps build a comprehensive historical dataset regardless of which park the user is viewing.
+ */
+export const logAllParksToSupabase = async () => {
+  console.log('Starting background sync for all parks...');
+  for (const park of WDW_PARKS) {
+    try {
+      const response = await fetch(`https://corsproxy.io/?https://api.themeparks.wiki/v1/entity/${park.id}/live`);
+      if (response.ok) {
+        const data = await response.json();
+        const items = data.liveData.filter((item: RideWaitTime) => item.entityType === 'ATTRACTION');
+        await logWaitTimesToSupabase(park.id, items);
+      }
+    } catch (err) {
+      console.error(`Failed to background sync ${park.name}:`, err);
+    }
+  }
+  console.log('Background sync complete.');
 };
 
 export interface HourlyAverage {
