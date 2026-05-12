@@ -8,6 +8,7 @@ export default function RootLayout() {
       <PlanProvider>
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="ride/[id]" options={{ headerShown: false }} />
         </Stack>
       </PlanProvider>
     </SafeAreaProvider>
