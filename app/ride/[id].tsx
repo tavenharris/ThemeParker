@@ -145,19 +145,66 @@ export default function RideDetailsScreen() {
                   </SvgLinearGradient>
                 </Defs>
                 <Path
-                  d="M0,200 Q100,60 200,160 T400,120 T600,200 T800,80 T1000,150 T1200,180 L1200,256 L0,256 Z"
+                  d={(() => {
+                    const maxWait = Math.max(...history.map(h => h.averageWait), 1);
+                    const minHour = Math.min(...history.map(h => h.hour));
+                    const maxHour = Math.max(...history.map(h => h.hour));
+                    const hourRange = Math.max(maxHour - minHour, 1);
+                    let d = '';
+                    history.forEach((h, i) => {
+                      const x = ((h.hour - minHour) / hourRange) * 1200;
+                      const y = 200 - (h.averageWait / maxWait) * 160;
+                      if (i === 0) d += `M${x},${y}`;
+                      else d += ` L${x},${y}`;
+                    });
+                    const lastX = ((history[history.length - 1].hour - minHour) / hourRange) * 1200;
+                    const firstX = ((history[0].hour - minHour) / hourRange) * 1200;
+                    d += ` L${lastX},256 L${firstX},256 Z`;
+                    return d;
+                  })()}
                   fill="url(#chartFill)"
                 />
                 <Path
-                  d="M0,200 Q100,60 200,160 T400,120 T600,200 T800,80 T1000,150 T1200,180"
+                  d={(() => {
+                    const maxWait = Math.max(...history.map(h => h.averageWait), 1);
+                    const minHour = Math.min(...history.map(h => h.hour));
+                    const maxHour = Math.max(...history.map(h => h.hour));
+                    const hourRange = Math.max(maxHour - minHour, 1);
+                    let d = '';
+                    history.forEach((h, i) => {
+                      const x = ((h.hour - minHour) / hourRange) * 1200;
+                      const y = 200 - (h.averageWait / maxWait) * 160;
+                      if (i === 0) d += `M${x},${y}`;
+                      else d += ` L${x},${y}`;
+                    });
+                    return d;
+                  })()}
                   fill="none"
                   stroke={Colors.primary}
                   strokeWidth="6"
                   strokeLinecap="round"
                 />
-                {/* Peak Points */}
-                <Circle cx="200" cy="160" r="12" fill={Colors.primary} />
-                <Circle cx="800" cy="80" r="16" fill={Colors.secondary} stroke="#ffffff" strokeWidth="4" />
+                {/* Points */}
+                {history.map((h, i) => {
+                  const maxWait = Math.max(...history.map(h => h.averageWait), 1);
+                  const minHour = Math.min(...history.map(h => h.hour));
+                  const maxHour = Math.max(...history.map(h => h.hour));
+                  const hourRange = Math.max(maxHour - minHour, 1);
+                  const x = ((h.hour - minHour) / hourRange) * 1200;
+                  const y = 200 - (h.averageWait / maxWait) * 160;
+                  const isBest = bestTime && h.hour === bestTime.hour;
+                  return (
+                    <Circle
+                      key={h.hour}
+                      cx={x}
+                      cy={y}
+                      r={isBest ? "16" : "8"}
+                      fill={isBest ? Colors.secondary : Colors.primary}
+                      stroke={isBest ? "#ffffff" : "none"}
+                      strokeWidth={isBest ? "4" : "0"}
+                    />
+                  );
+                })}
               </Svg>
             ) : (
               <Text style={{ textAlign: 'center', marginTop: 80, color: Colors.outline }}>No trend data available.</Text>
@@ -172,8 +219,19 @@ export default function RideDetailsScreen() {
             </View>
 
             {/* Floating Bubble */}
-            {!loading && history.length > 0 && (
-              <View style={styles.floatingBubble}>
+            {!loading && history.length > 0 && bestTime && (
+              <View style={[styles.floatingBubble, {
+                left: (() => {
+                  const minHour = Math.min(...history.map(h => h.hour));
+                  const maxHour = Math.max(...history.map(h => h.hour));
+                  const hourRange = Math.max(maxHour - minHour, 1);
+                  const xPercent = ((bestTime.hour - minHour) / hourRange) * 100;
+                  // Keep bubble within bounds
+                  return `${Math.min(Math.max(xPercent, 10), 90)}%`;
+                })(),
+                top: -10, // Move above chart line
+                transform: [{ translateX: -40 }] // Center the bubble based on approximate width
+              }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                   <Ionicons name="star" size={16} color={Colors.secondary} />
                   <Text style={styles.bubbleText}>{bestTime?.averageWait}m</Text>
@@ -183,39 +241,29 @@ export default function RideDetailsScreen() {
             )}
           </View>
           <View style={styles.chartXAxis}>
-            <Text style={styles.xAxisLabel}>Morning</Text>
-            <Text style={styles.xAxisLabel}>Noon</Text>
-            <Text style={styles.xAxisLabel}>Evening</Text>
-            <Text style={styles.xAxisLabel}>Night</Text>
-          </View>
-        </View>
-
-        {/* Crowd Insight Bento */}
-        <View style={styles.bentoGrid}>
-          <View style={[styles.bentoItem, styles.bentoFull, { backgroundColor: Colors.surfaceContainerHigh }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-              <Ionicons name="information-circle" size={20} color={Colors.primary} />
-              <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.primary }}>PRO TIP</Text>
-            </View>
-            <Text style={{ fontSize: 14, color: Colors.onSurfaceVariant, lineHeight: 20 }}>
-              Wait times typically drop by 40% during the first parade performance or evening fireworks. Plan your ride during this window for maximum efficiency.
-            </Text>
-          </View>
-          <View style={styles.bentoRow}>
-            <View style={[styles.bentoItem, styles.bentoHalf, { backgroundColor: Colors.surfaceContainerLow }]}>
-              <Text style={{ fontSize: 12, fontWeight: '600', color: Colors.onSurfaceVariant, marginBottom: 4 }}>LOAD SPEED</Text>
-              <Text style={{ fontSize: 24, fontWeight: '700', color: Colors.primary, fontFamily: 'Georgia' }}>FAST</Text>
-              <View style={{ width: '100%', height: 4, backgroundColor: Colors.outlineVariant, borderRadius: 2, marginTop: 8 }}>
-                <View style={{ width: '85%', height: '100%', backgroundColor: Colors.primary, borderRadius: 2 }} />
+            {history.length > 0 ? (
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%' }}>
+                <Text style={styles.xAxisLabel}>
+                  {(() => {
+                    const minH = Math.min(...history.map(h => h.hour));
+                    return `${minH > 12 ? minH - 12 : minH}${minH >= 12 ? 'pm' : 'am'}`;
+                  })()}
+                </Text>
+                <Text style={styles.xAxisLabel}>
+                  {(() => {
+                    const maxH = Math.max(...history.map(h => h.hour));
+                    return `${maxH > 12 ? maxH - 12 : maxH}${maxH >= 12 ? 'pm' : 'am'}`;
+                  })()}
+                </Text>
               </View>
-            </View>
-            <View style={[styles.bentoItem, styles.bentoHalf, { backgroundColor: Colors.surfaceContainerLow }]}>
-              <Text style={{ fontSize: 12, fontWeight: '600', color: Colors.onSurfaceVariant, marginBottom: 4 }}>CAPACITY</Text>
-              <Text style={{ fontSize: 24, fontWeight: '700', color: Colors.primary, fontFamily: 'Georgia' }}>HIGH</Text>
-              <View style={{ width: '100%', height: 4, backgroundColor: Colors.outlineVariant, borderRadius: 2, marginTop: 8 }}>
-                <View style={{ width: '95%', height: '100%', backgroundColor: Colors.secondary, borderRadius: 2 }} />
-              </View>
-            </View>
+            ) : (
+              <>
+                <Text style={styles.xAxisLabel}>Morning</Text>
+                <Text style={styles.xAxisLabel}>Noon</Text>
+                <Text style={styles.xAxisLabel}>Evening</Text>
+                <Text style={styles.xAxisLabel}>Night</Text>
+              </>
+            )}
           </View>
         </View>
 

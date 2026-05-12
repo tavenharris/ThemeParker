@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, ImageBackground, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, ImageBackground, ScrollView, TextInput } from 'react-native';
 import { WDW_PARKS, fetchWaitTimes, RideWaitTime, Park } from '../../src/api';
 import { usePlan } from '../../src/PlanContext';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import Fuse from 'fuse.js';
 
 const Colors = {
   primary: '#021541',
@@ -32,6 +33,7 @@ export default function WaitTimesScreen() {
   const [selectedPark, setSelectedPark] = useState<Park>(WDW_PARKS[0]);
   const [waitTimes, setWaitTimes] = useState<RideWaitTime[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const { addRide, isPlanned, removeRide } = usePlan();
   const router = useRouter();
 
@@ -56,6 +58,16 @@ export default function WaitTimesScreen() {
         return 'https://images.unsplash.com/photo-1590856029826-c7a73142bbf1?q=80&w=2073&auto=format&fit=crop';
     }
   };
+
+  const fuse = React.useMemo(() => new Fuse(waitTimes, {
+    keys: ['name', 'status'],
+    threshold: 0.4, // Generous fuzzy search
+  }), [waitTimes]);
+
+  const filteredWaitTimes = React.useMemo(() => {
+    if (!searchQuery) return waitTimes;
+    return fuse.search(searchQuery).map(result => result.item);
+  }, [searchQuery, waitTimes, fuse]);
 
   const renderWaitTime = ({ item, index }: { item: RideWaitTime, index: number }) => {
     const planned = isPlanned(item.id);
@@ -87,18 +99,6 @@ export default function WaitTimesScreen() {
             </View>
           )}
         </View>
-
-        {/* Decorative mini bar chart (static visual placeholder as per design) */}
-        {isOperating && (
-          <View style={styles.miniChartContainer}>
-             <View style={[styles.miniBar, { height: '40%', backgroundColor: '#dae1ff' }]} />
-             <View style={[styles.miniBar, { height: '55%', backgroundColor: '#dae1ff' }]} />
-             <View style={[styles.miniBar, { height: '70%', backgroundColor: '#dae1ff' }]} />
-             <View style={[styles.miniBar, { height: '90%', backgroundColor: Colors.secondaryContainer }]} />
-             <View style={[styles.miniBar, { height: '60%', backgroundColor: '#dae1ff' }]} />
-             <View style={[styles.miniBar, { height: '40%', backgroundColor: '#dae1ff' }]} />
-          </View>
-        )}
 
         <View style={styles.rideCardFooter}>
           <View style={styles.footerInfo}>
@@ -142,69 +142,72 @@ export default function WaitTimesScreen() {
         />
       </View>
 
+      <View style={styles.searchContainer}>
+        <Ionicons name="search" size={20} color={Colors.outline} style={styles.searchIcon} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search rides and activities..."
+          placeholderTextColor={Colors.outline}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
+            <Ionicons name="close-circle" size={20} color={Colors.outline} />
+          </TouchableOpacity>
+        )}
+      </View>
+
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         
         {/* Hero Section */}
-        <View style={styles.heroContainer}>
-          <ImageBackground 
-            source={{ uri: getParkImage(selectedPark.id) }} 
-            style={styles.heroImage}
-            imageStyle={{ borderRadius: 16 }}
-          >
-            <LinearGradient
-              colors={['rgba(2, 21, 65, 0.8)', 'transparent']}
-              start={{ x: 0, y: 1 }}
-              end={{ x: 0, y: 0 }}
-              style={styles.heroGradient}
+        {!searchQuery && (
+          <View style={styles.heroContainer}>
+            <ImageBackground 
+              source={{ uri: getParkImage(selectedPark.id) }} 
+              style={styles.heroImage}
+              imageStyle={{ borderRadius: 16 }}
             >
-              <View>
-                <Text style={styles.heroTitle}>{selectedPark.name.replace("Disney's ", "")}</Text>
-                <View style={styles.heroScheduleRow}>
-                  <Ionicons name="time-outline" size={16} color={Colors.secondaryFixedDim} />
-                  <Text style={styles.heroScheduleText}>9AM - 11PM</Text>
+              <LinearGradient
+                colors={['rgba(2, 21, 65, 0.8)', 'transparent']}
+                start={{ x: 0, y: 1 }}
+                end={{ x: 0, y: 0 }}
+                style={styles.heroGradient}
+              >
+                <View>
+                  <Text style={styles.heroTitle}>{selectedPark.name.replace("Disney's ", "")}</Text>
                 </View>
-              </View>
-
-              <View style={styles.heroStatsRow}>
-                <View style={styles.heroStatBox}>
-                  <Text style={styles.heroStatLabel}>Crowd Level</Text>
-                  <Text style={styles.heroStatValue}>
-                    8 <Text style={styles.heroStatSubValue}>/ 10</Text>
-                  </Text>
-                </View>
-                <View style={styles.heroStatBox}>
-                  <Text style={styles.heroStatLabel}>Early Entry</Text>
-                  <Text style={[styles.heroStatValue, { fontSize: 20 }]}>8:30 AM</Text>
-                </View>
-              </View>
-            </LinearGradient>
-          </ImageBackground>
-        </View>
+              </LinearGradient>
+            </ImageBackground>
+          </View>
+        )}
 
         {/* CTA Card */}
-        <View style={styles.ctaCard}>
-          <Ionicons name="color-wand" size={100} color="rgba(255,255,255,0.05)" style={styles.ctaBgIcon} />
-          <Text style={styles.ctaTitle}>Perfect Your Park Day</Text>
-          <Text style={styles.ctaBody}>Our expert AI optimizes your route based on real-time crowd flow and wait-time predictions.</Text>
-          
-          <LinearGradient
-             colors={[Colors.secondaryContainer, Colors.secondaryFixed]}
-             start={{ x: 0, y: 0 }}
-             end={{ x: 1, y: 0 }}
-             style={styles.ctaButton}
-          >
-            <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Text style={styles.ctaButtonText}>Start Planning</Text>
-              <Ionicons name="sparkles" size={16} color={Colors.primary} style={{ marginLeft: 4 }} />
-            </TouchableOpacity>
-          </LinearGradient>
-        </View>
+        {!searchQuery && (
+          <View style={styles.ctaCard}>
+            <Ionicons name="color-wand" size={100} color="rgba(255,255,255,0.05)" style={styles.ctaBgIcon} />
+            <Text style={styles.ctaTitle}>Perfect Your Park Day</Text>
+            <Text style={styles.ctaBody}>Our expert AI optimizes your route based on real-time crowd flow and wait-time predictions.</Text>
+            
+            <LinearGradient
+               colors={[Colors.secondaryContainer, Colors.secondaryFixed]}
+               start={{ x: 0, y: 0 }}
+               end={{ x: 1, y: 0 }}
+               style={styles.ctaButton}
+            >
+              <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={styles.ctaButtonText}>Start Planning</Text>
+                <Ionicons name="sparkles" size={16} color={Colors.primary} style={{ marginLeft: 4 }} />
+              </TouchableOpacity>
+            </LinearGradient>
+          </View>
+        )}
 
         {/* List Header */}
         <View style={styles.listHeader}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <Ionicons name="trending-up" size={20} color={Colors.secondaryContainer} style={{ marginRight: 8 }} />
-            <Text style={styles.listTitle}>Featured Wait Times</Text>
+            <Text style={styles.listTitle}>{searchQuery ? 'Search Results' : 'Featured Wait Times'}</Text>
           </View>
           <Text style={styles.listSubtitle}>Updated: Just Now</Text>
         </View>
@@ -213,11 +216,14 @@ export default function WaitTimesScreen() {
           <ActivityIndicator size="large" color={Colors.primary} style={{ marginTop: 50 }} />
         ) : (
           <View style={styles.ridesContainer}>
-            {waitTimes.map((item, index) => (
+            {filteredWaitTimes.map((item, index) => (
               <React.Fragment key={item.id}>
                 {renderWaitTime({ item, index })}
               </React.Fragment>
             ))}
+            {filteredWaitTimes.length === 0 && !loading && (
+              <Text style={{ textAlign: 'center', color: Colors.outline, marginTop: 20 }}>No rides or activities found.</Text>
+            )}
           </View>
         )}
       </ScrollView>
@@ -253,6 +259,35 @@ const styles = StyleSheet.create({
   },
   parkTabTextActive: {
     color: Colors.onPrimaryContainer,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surfaceContainerLowest,
+    marginHorizontal: 16,
+    marginTop: 16,
+    paddingHorizontal: 16,
+    borderRadius: 24,
+    height: 48,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant + '40',
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: Colors.onSurface,
+  },
+  clearButton: {
+    marginLeft: 8,
+    padding: 4,
   },
   scrollContent: {
     padding: 20,
