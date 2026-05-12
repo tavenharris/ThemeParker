@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, ActivityIndicator } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Path, Circle } from 'react-native-svg';
 import { getHistoricalWaitTimes, HourlyAverage } from '../../src/api';
+import { useAuth } from '../../src/AuthContext';
 
 const Colors = {
   primary: '#021541',
@@ -36,6 +37,7 @@ const Colors = {
 const screenWidth = Dimensions.get('window').width;
 
 export default function RideDetailsScreen() {
+  const { session, isLoading: isAuthLoading } = useAuth();
   const { id, name, waitTime, status } = useLocalSearchParams<{ id: string, name: string, waitTime: string, status: string }>();
   const router = useRouter();
   const [history, setHistory] = useState<HourlyAverage[]>([]);
@@ -54,13 +56,25 @@ export default function RideDetailsScreen() {
     setLoading(false);
   };
 
-  const avgWait = history.length > 0 
+  const avgWait = history.length > 0
     ? Math.round(history.reduce((acc, curr) => acc + curr.averageWait, 0) / history.length)
     : '--';
 
-  const bestTime = history.length > 0 
+  const bestTime = history.length > 0
     ? [...history].sort((a, b) => a.averageWait - b.averageWait)[0]
     : null;
+
+  if (isAuthLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+      </View>
+    );
+  }
+
+  if (!session) {
+    return <Redirect href="/login" />;
+  }
 
   return (
     <View style={styles.container}>
@@ -273,6 +287,12 @@ export default function RideDetailsScreen() {
 }
 
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surface,
+  },
   container: {
     flex: 1,
     backgroundColor: Colors.surface,

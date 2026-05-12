@@ -1,5 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, ImageBackground, ScrollView, TextInput } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, ImageBackground, ScrollView, TextInput, LayoutAnimation, Platform, UIManager } from 'react-native';
+
+if (
+  Platform.OS === 'android' &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import { WDW_PARKS, fetchWaitTimes, RideWaitTime, Park } from '../../src/api';
 import { usePlan } from '../../src/PlanContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -72,6 +79,7 @@ export default function WaitTimesScreen() {
   const renderWaitTime = ({ item, index }: { item: RideWaitTime, index: number }) => {
     const planned = isPlanned(item.id);
     const isOperating = item.status === 'OPERATING';
+    const isShow = item.entityType === 'SHOW';
     const waitTime = item.queue?.STANDBY?.waitTime || 0;
     
     // Pseudo-random land color based on index
@@ -85,14 +93,20 @@ export default function WaitTimesScreen() {
     return (
       <TouchableOpacity 
         style={[styles.rideCard, { borderLeftColor: accentColor }]}
-        onPress={() => router.push({ pathname: '/ride/[id]', params: { id: item.id, name: item.name, waitTime: waitTime.toString(), status: item.status } })}
+        onPress={() => !isShow && router.push({ pathname: '/ride/[id]', params: { id: item.id, name: item.name, waitTime: waitTime.toString(), status: item.status } })}
+        disabled={isShow} // Shows don't have detailed stats page yet
       >
         <View style={styles.rideCardHeader}>
           <View style={{ flex: 1, paddingRight: 10 }}>
             <Text style={styles.rideName}>{item.name}</Text>
-            <Text style={styles.rideLand}>{isOperating ? 'Standby Queue' : item.status}</Text>
+            <Text style={styles.rideLand}>{isShow ? 'Show/Entertainment' : (isOperating ? 'Standby Queue' : item.status)}</Text>
+            {isShow && item.showtimes && item.showtimes.length > 0 && (
+              <Text style={{ fontSize: 12, color: Colors.onSurfaceVariant, marginTop: 4 }}>
+                Next: {new Date(item.showtimes.find(s => new Date(s.startTime) > new Date())?.startTime || item.showtimes[0].startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+              </Text>
+            )}
           </View>
-          {isOperating && (
+          {!isShow && isOperating && (
             <View style={[styles.waitTimeBox, { backgroundColor: waitBoxStyle.backgroundColor }]}>
               <Text style={[styles.waitTimeNumber, { color: waitBoxStyle.color }]}>{waitTime}</Text>
               <Text style={[styles.waitTimeLabel, { color: waitBoxStyle.color }]}>MIN</Text>
@@ -107,7 +121,21 @@ export default function WaitTimesScreen() {
           </View>
           <TouchableOpacity
             style={styles.planButton}
-            onPress={(e) => { e.stopPropagation(); planned ? removeRide(item.id) : addRide(item); }}
+            onPress={(e) => { 
+              e.stopPropagation(); 
+              if (planned) {
+                removeRide(item.id);
+              } else {
+                // For shows, try to pick the first upcoming showtime as the default blocked hour
+                let selectedHour;
+                if (isShow && item.showtimes && item.showtimes.length > 0) {
+                  const upcoming = item.showtimes.find(s => new Date(s.startTime) > new Date()) || item.showtimes[0];
+                  const st = new Date(upcoming.startTime);
+                  selectedHour = st.getHours() + st.getMinutes() / 60;
+                }
+                addRide(item, selectedHour);
+              }
+            }}
           >
             <Ionicons 
               name={planned ? 'checkmark-circle' : 'add-circle'} 
@@ -149,10 +177,16 @@ export default function WaitTimesScreen() {
           placeholder="Search rides and activities..."
           placeholderTextColor={Colors.outline}
           value={searchQuery}
-          onChangeText={setSearchQuery}
+          onChangeText={(text) => {
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setSearchQuery(text);
+          }}
         />
         {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
+          <TouchableOpacity onPress={() => {
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setSearchQuery('');
+          }} style={styles.clearButton}>
             <Ionicons name="close-circle" size={20} color={Colors.outline} />
           </TouchableOpacity>
         )}

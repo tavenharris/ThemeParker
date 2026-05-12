@@ -12,6 +12,12 @@ export const WDW_PARKS: Park[] = [
   { id: '1c84a229-8862-4648-9c71-378ddd2c7693', name: "Disney's Animal Kingdom Theme Park" },
 ];
 
+export interface Showtime {
+  type: string;
+  startTime: string;
+  endTime: string;
+}
+
 export interface RideWaitTime {
   id: string;
   name: string;
@@ -30,6 +36,7 @@ export interface RideWaitTime {
       returnEnd: string;
     };
   };
+  showtimes?: Showtime[];
 }
 
 const logWaitTimesToSupabase = async (parkId: string, rides: RideWaitTime[]) => {
@@ -37,7 +44,7 @@ const logWaitTimesToSupabase = async (parkId: string, rides: RideWaitTime[]) => 
     return; // Skip logging if Supabase is not configured
   }
 
-  const logs = rides.map(ride => ({
+  const logs = rides.filter(r => r.entityType === 'ATTRACTION').map(ride => ({
     ride_id: ride.id,
     park_id: parkId,
     wait_time: ride.queue?.STANDBY?.waitTime || 0,
@@ -102,12 +109,12 @@ export const fetchWaitTimes = async (parkId: string): Promise<RideWaitTime[]> =>
       throw new Error(`Error fetching wait times: ${response.statusText}`);
     }
     const data = await response.json();
-    const attractions = data.liveData.filter((item: RideWaitTime) => item.entityType === 'ATTRACTION');
+    const items = data.liveData.filter((item: RideWaitTime) => item.entityType === 'ATTRACTION' || item.entityType === 'SHOW');
     
     // Asynchronously log to our database for historical tracking
-    logWaitTimesToSupabase(parkId, attractions);
+    logWaitTimesToSupabase(parkId, items);
     
-    return attractions;
+    return items;
   } catch (error) {
     console.error('fetchWaitTimes error:', error);
     return [];

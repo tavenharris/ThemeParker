@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Image, Animated } from 'react-native';
-import { usePlan } from '../../src/PlanContext';
-import { RideWaitTime, getHistoricalWaitTimes, HourlyAverage } from '../../src/api';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Animated, ScrollView, Modal, Dimensions } from 'react-native';
+import { usePlan, TripDayPlan } from '../../src/PlanContext';
+import { getHistoricalWaitTimes, HourlyAverage, WDW_PARKS } from '../../src/api';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 
 const Colors = {
   primary: '#021541',
@@ -32,22 +31,86 @@ const Colors = {
   onSecondaryContainer: '#745c00',
 };
 
-const TimelineItem = ({ item, index, isLast, removeRide }: { item: any, index: number, isLast: boolean, removeRide: (id: string) => void }) => {
-  const waitTime = item.expectedWait !== undefined ? item.expectedWait : (item.queue?.STANDBY?.waitTime || 0);
-  
-  const hour = item.scheduledHour !== undefined ? item.scheduledHour : 9 + index;
+const TIME_OPTIONS = Array.from({ length: 25 }, (_, i) => 9 + i * 0.5); // 9:00 AM to 9:00 PM
+const DURATION_OPTIONS = [0.5, 1, 1.5, 2, 2.5, 3];
+const BREAK_TYPES = ['Lunch', 'Dinner', 'Snack', 'Rest Break', 'Custom'];
+
+const formatTime = (hour: number) => {
   const h = Math.floor(hour);
   const m = Math.round((hour - h) * 60);
   const ampm = h >= 12 && h < 24 ? 'PM' : 'AM';
   const displayH = h % 12 === 0 ? 12 : h % 12;
-  const displayM = m < 10 ? `0${m}` : m;
-  const timeString = `${displayH}:${displayM} ${ampm}`;
+  const displayM = m === 0 ? '00' : m;
+  return `${displayH}:${displayM} ${ampm}`;
+};
+
+const formatDuration = (hours: number) => {
+  if (hours === 1) return '1 hr';
+  if (hours % 1 === 0) return `${hours} hrs`;
+  return `${hours * 60} min`;
+};
+
+const formatTripDate = (value: string) => {
+  const date = new Date(`${value}T00:00:00`);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    weekday: 'short',
+  }).format(date);
+};
+
+const formatParkName = (parkId: string) => {
+  const park = WDW_PARKS.find((item) => item.id === parkId);
+  return (park?.name ?? 'Select a park')
+    .replace('Disney\'s ', '')
+    .replace(' Theme Park', '')
+    .replace(' Park', '');
+};
+
+const TripSummaryCard = ({ tripDays }: { tripDays: TripDayPlan[] }) => {
+  if (tripDays.length === 0) {
+    return null;
+  }
+
+  return (
+    <View style={styles.tripSummaryCard}>
+      <View style={styles.tripSummaryHeader}>
+        <View>
+          <Text style={styles.tripSummaryLabel}>Trip Plan</Text>
+          <Text style={styles.tripSummaryTitle}>{tripDays.length} Day Park Schedule</Text>
+        </View>
+        <Ionicons name="map" size={24} color={Colors.secondaryContainer} />
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tripDayPills}>
+        {tripDays.map((day, index) => (
+          <View key={day.date} style={styles.tripDayPill}>
+            <Text style={styles.tripDayDate}>Day {index + 1} · {formatTripDate(day.date)}</Text>
+            <Text style={styles.tripDayPark}>{formatParkName(day.parkId)}</Text>
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+};
+
+const TimelineItem = ({ item, index, isLast, removeRide, removeBreak }: { item: any, index: number, isLast: boolean, removeRide: (id: string) => void, removeBreak: (id: string) => void }) => {
+  const isBreak = item.isBreak;
+  const isShow = item.entityType === 'SHOW';
   
-  // Decide colors based on wait time severity
-  const isHighWait = waitTime > 50;
-  const badgeBg = isHighWait ? Colors.errorContainer : Colors.primaryContainer;
-  const badgeText = isHighWait ? Colors.onErrorContainer : Colors.onPrimaryContainer;
-  const badgeLabel = isHighWait ? `Peak: ${waitTime}m Wait` : `${waitTime}m Wait`;
+  const waitTime = item.expectedWait !== undefined ? item.expectedWait : (item.queue?.STANDBY?.waitTime || 0);
+  
+  const hour = item.scheduledHour !== undefined ? item.scheduledHour : 9 + index;
+  const timeString = formatTime(hour);
+  
+  // Decide colors based on item type
+  const badgeBg = isBreak ? Colors.surfaceContainerHigh : (isShow ? Colors.tertiaryFixedDim : (waitTime > 50 ? Colors.errorContainer : Colors.primaryContainer));
+  const badgeText = isBreak ? Colors.onSurface : (isShow ? Colors.primary : (waitTime > 50 ? Colors.onErrorContainer : Colors.onPrimaryContainer));
+  const badgeLabel = isBreak ? 'Break' : (isShow ? 'Showtime' : (waitTime > 50 ? `Peak: ${waitTime}m Wait` : `${waitTime}m Wait`));
 
   return (
     <View style={styles.timelineWrapper}>
@@ -55,12 +118,12 @@ const TimelineItem = ({ item, index, isLast, removeRide }: { item: any, index: n
       {!isLast && <View style={styles.timelineLine} />}
       
       {/* Timeline Node Icon */}
-      <View style={styles.timelineNode}>
-        <Ionicons name="color-wand" size={20} color={Colors.primary} />
+      <View style={[styles.timelineNode, isBreak ? { borderColor: Colors.outline } : {}]}>
+        <Ionicons name={isBreak ? "restaurant" : (isShow ? "star" : "color-wand")} size={20} color={isBreak ? Colors.outline : Colors.primary} />
       </View>
 
       {/* Ride Card */}
-      <View style={[styles.timelineCard, isHighWait ? { borderLeftColor: Colors.primaryFixedDim } : { borderLeftColor: Colors.primary }]}>
+      <View style={[styles.timelineCard, isBreak ? { borderLeftColor: Colors.outlineVariant } : (isShow ? { borderLeftColor: Colors.tertiaryFixedDim } : (waitTime > 50 ? { borderLeftColor: Colors.primaryFixedDim } : { borderLeftColor: Colors.primary })) ]}>
         <View style={styles.cardHeaderRow}>
           <Text style={styles.cardTime}>{timeString}</Text>
           <View style={[styles.waitBadge, { backgroundColor: badgeBg }]}>
@@ -72,18 +135,18 @@ const TimelineItem = ({ item, index, isLast, removeRide }: { item: any, index: n
         
         <View style={styles.cardFooterRow}>
           <View style={styles.locationGroup}>
-            <Ionicons name="information-circle-outline" size={14} color={Colors.onSurfaceVariant} />
-            <Text style={styles.locationText}>{item.status}</Text>
+            <Ionicons name={isBreak ? "time-outline" : "information-circle-outline"} size={14} color={Colors.onSurfaceVariant} />
+            <Text style={styles.locationText}>{isBreak ? formatDuration(item.durationHours) : (isShow ? 'Entertainment' : item.status)}</Text>
           </View>
           
-          <TouchableOpacity onPress={() => removeRide(item.id)} style={styles.removeBtn}>
+          <TouchableOpacity onPress={() => isBreak ? removeBreak(item.id) : removeRide(item.id)} style={styles.removeBtn}>
             <Ionicons name="trash-outline" size={18} color={Colors.outlineVariant} />
           </TouchableOpacity>
         </View>
       </View>
 
       {/* Transit/Walking step */}
-      {!isLast && (
+      {!isLast && !isBreak && (
         <View style={styles.transitWrapper}>
           <View style={styles.transitDot} />
           <View style={styles.transitPill}>
@@ -96,48 +159,181 @@ const TimelineItem = ({ item, index, isLast, removeRide }: { item: any, index: n
   );
 };
 
-export default function PlanScreen() {
-  const { plannedRides, removeRide } = usePlan();
-  const [isOptimizing, setIsOptimizing] = useState(false);
-  const [optimizedRides, setOptimizedRides] = useState<any[]>([]);
+const BreakModal = ({ isVisible, onClose, onAdd }: { isVisible: boolean, onClose: () => void, onAdd: (type: string, time: number, duration: number) => void }) => {
+  const [breakType, setBreakType] = useState(BREAK_TYPES[0]);
+  const [breakTime, setBreakTime] = useState(12.5);
+  const [breakDuration, setBreakDuration] = useState(1);
+  
+  const slideAnim = useRef(new Animated.Value(Dimensions.get('window').height)).current;
 
-  // Clear optimized list if a ride is removed that was in the optimization
   useEffect(() => {
-    if (optimizedRides.length > 0) {
-      const stillValid = optimizedRides.every(optRide => plannedRides.some(pr => pr.id === optRide.id));
-      if (!stillValid || optimizedRides.length !== plannedRides.length) {
-        setOptimizedRides([]); // Reset if mismatch
+    if (isVisible) {
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 50,
+        friction: 8
+      }).start();
+    } else {
+      slideAnim.setValue(Dimensions.get('window').height);
+    }
+  }, [isVisible]);
+
+  return (
+    <Modal visible={isVisible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <Animated.View style={[styles.modalContent, { transform: [{ translateY: slideAnim }] }]}>
+          <Text style={styles.modalTitle}>Schedule Break</Text>
+          
+          <Text style={styles.pickerLabel}>Type</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pickerScroll}>
+            {BREAK_TYPES.map(type => (
+              <TouchableOpacity 
+                key={type} 
+                style={[styles.pickerChip, breakType === type && styles.pickerChipActive]}
+                onPress={() => setBreakType(type)}
+              >
+                <Text style={[styles.pickerChipText, breakType === type && styles.pickerChipTextActive]}>{type}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <Text style={styles.pickerLabel}>Start Time</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pickerScroll}>
+            {TIME_OPTIONS.map(time => (
+              <TouchableOpacity 
+                key={time} 
+                style={[styles.pickerChip, breakTime === time && styles.pickerChipActive]}
+                onPress={() => setBreakTime(time)}
+              >
+                <Text style={[styles.pickerChipText, breakTime === time && styles.pickerChipTextActive]}>{formatTime(time)}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <Text style={styles.pickerLabel}>Duration</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pickerScroll}>
+            {DURATION_OPTIONS.map(dur => (
+              <TouchableOpacity 
+                key={dur} 
+                style={[styles.pickerChip, breakDuration === dur && styles.pickerChipActive]}
+                onPress={() => setBreakDuration(dur)}
+              >
+                <Text style={[styles.pickerChipText, breakDuration === dur && styles.pickerChipTextActive]}>{formatDuration(dur)}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <View style={styles.modalActions}>
+             <TouchableOpacity style={[styles.modalBtn, styles.modalBtnCancel]} onPress={onClose}>
+               <Text style={styles.modalBtnCancelText}>Cancel</Text>
+             </TouchableOpacity>
+             <TouchableOpacity style={[styles.modalBtn, styles.modalBtnAdd]} onPress={() => onAdd(breakType, breakTime, breakDuration)}>
+               <Text style={styles.modalBtnAddText}>Add Break</Text>
+             </TouchableOpacity>
+          </View>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+};
+
+export default function PlanScreen() {
+  const { plannedRides, removeRide, plannedBreaks, addBreak, removeBreak, tripDays } = usePlan();
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [optimizedPlan, setOptimizedPlan] = useState<any[]>([]);
+
+  // Modal Visibility State
+  const [isModalVisible, setModalVisible] = useState(false);
+
+  // Clear optimized list if a ride or break is removed that was in the optimization
+  useEffect(() => {
+    if (optimizedPlan.length > 0) {
+      const ridesInOpt = optimizedPlan.filter(r => !r.isBreak);
+      const breaksInOpt = optimizedPlan.filter(r => r.isBreak);
+      
+      const ridesStillValid = ridesInOpt.every(optRide => plannedRides.some(pr => pr.id === optRide.id));
+      const breaksStillValid = breaksInOpt.every(optBreak => plannedBreaks.some(pb => pb.id === optBreak.id));
+      
+      if (!ridesStillValid || !breaksStillValid || ridesInOpt.length !== plannedRides.length || breaksInOpt.length !== plannedBreaks.length) {
+        setOptimizedPlan([]); // Reset if mismatch
       }
     }
-  }, [plannedRides]);
+  }, [plannedRides, plannedBreaks]);
+
+  const handleAddBreak = (type: string, time: number, duration: number) => {
+    addBreak({
+      id: `break-${Date.now()}`,
+      name: type === 'Custom' ? 'Break' : `${type} Break`,
+      startTimeHour: time,
+      durationHours: duration
+    });
+    setModalVisible(false);
+  };
 
   const optimizePlan = async () => {
-    if (plannedRides.length === 0) return;
+    if (plannedRides.length === 0 && plannedBreaks.length === 0) return;
     setIsOptimizing(true);
-    setOptimizedRides([]); // Clear existing first to show loading state well
+    setOptimizedPlan([]);
 
-    // Fetch history for all rides
+    // Fetch history for all rides (ignore shows for wait time history)
     const historyData: Record<string, HourlyAverage[]> = {};
     for (const ride of plannedRides) {
-      historyData[ride.id] = await getHistoricalWaitTimes(ride.id);
+      if (ride.entityType !== 'SHOW') {
+        historyData[ride.id] = await getHistoricalWaitTimes(ride.id);
+      }
     }
 
-    // Greedy optimization starting at 9 AM
-    let currentTimeHour = 9;
-    const unassigned = [...plannedRides];
+    const unassignedAttractions = plannedRides.filter(r => r.entityType !== 'SHOW');
+    const shows = plannedRides.filter(r => r.entityType === 'SHOW').map(s => ({
+      ...s,
+      scheduledHour: (s as any).selectedShowtimeHour || 15, // default 3 PM if not set
+      durationHours: 0.75, // 45 min for show
+      isBreak: false
+    }));
+
+    const breaks = plannedBreaks.map(b => ({
+      ...b,
+      scheduledHour: b.startTimeHour,
+      isBreak: true
+    }));
+
+    // Fixed schedule items (Shows and Breaks)
+    const fixedItems = [...shows, ...breaks].sort((a, b) => a.scheduledHour - b.scheduledHour);
+
+    let currentTimeHour = 9; // Park opens 9 AM
     const newPlan = [];
 
-    while (unassigned.length > 0) {
+    // Utility to check if a specific time slot overlaps with fixed items
+    const getNextAvailableTime = (time: number, duration: number) => {
+      let current = time;
+      let conflict = true;
+      while (conflict) {
+        conflict = false;
+        for (const fixed of fixedItems) {
+          const fixedEnd = fixed.scheduledHour + (fixed.durationHours || 0.75);
+          const currentEnd = current + duration;
+          // Check overlap
+          if (current < fixedEnd && currentEnd > fixed.scheduledHour) {
+            current = fixedEnd; // Skip to the end of the conflicting block
+            conflict = true;
+            break;
+          }
+        }
+      }
+      return current;
+    };
+
+    while (unassignedAttractions.length > 0) {
       let bestRideIndex = -1;
       let minWait = Infinity;
 
-      for (let i = 0; i < unassigned.length; i++) {
-        const ride = unassigned[i];
+      for (let i = 0; i < unassignedAttractions.length; i++) {
+        const ride = unassignedAttractions[i];
         const history = historyData[ride.id];
         
         let wait = ride.queue?.STANDBY?.waitTime || 30; // fallback
         if (history && history.length > 0) {
-          // Find the average wait time for the closest matching hour
           const closest = history.reduce((prev, curr) => 
             Math.abs(curr.hour - currentTimeHour) < Math.abs(prev.hour - currentTimeHour) ? curr : prev
           );
@@ -150,36 +346,65 @@ export default function PlanScreen() {
         }
       }
 
-      const selectedRide = unassigned[bestRideIndex];
+      const selectedRide = unassignedAttractions[bestRideIndex];
+      const waitHours = minWait / 60;
+      const rideDuration = 10 / 60; // 10 min ride time
+      const transit = 10 / 60; // 10 min transit
+      const totalBlock = waitHours + rideDuration;
+
+      // Ensure we don't start the wait/ride during a show or break
+      currentTimeHour = getNextAvailableTime(currentTimeHour, totalBlock);
+
       newPlan.push({
         ...selectedRide,
         scheduledHour: currentTimeHour,
         expectedWait: minWait
       });
-      unassigned.splice(bestRideIndex, 1);
 
-      // Advance time: wait time + assumed 10 min transit
-      currentTimeHour += (minWait + 10) / 60;
+      unassignedAttractions.splice(bestRideIndex, 1);
+      currentTimeHour += totalBlock + transit;
     }
 
-    setOptimizedRides(newPlan);
+    // Combine newly scheduled rides with the fixed items
+    const finalPlan = [...newPlan, ...fixedItems].sort((a, b) => a.scheduledHour - b.scheduledHour);
+
+    setOptimizedPlan(finalPlan);
     setIsOptimizing(false);
   };
 
-  if (plannedRides.length === 0) {
+  if (plannedRides.length === 0 && plannedBreaks.length === 0) {
     return (
       <View style={styles.emptyContainer}>
         <Ionicons name="clipboard-outline" size={64} color={Colors.outlineVariant} />
         <Text style={styles.emptyText}>Your plan is empty.</Text>
-        <Text style={styles.emptySubtext}>Go to the Wait Times tab to add rides to your priority list!</Text>
+        <Text style={styles.emptySubtext}>Go to the Wait Times tab to add rides and shows to your priority list!</Text>
+        <TripSummaryCard tripDays={tripDays} />
+        
+        <View style={[styles.breaksContainer, {marginTop: 24}]}>
+          <TouchableOpacity style={styles.addBreakButton} onPress={() => setModalVisible(true)}>
+            <Ionicons name="add-circle-outline" size={20} color={Colors.onPrimary} />
+            <Text style={styles.addBreakButtonText}>Schedule Custom Break</Text>
+          </TouchableOpacity>
+        </View>
+
+        <BreakModal 
+          isVisible={isModalVisible} 
+          onClose={() => setModalVisible(false)} 
+          onAdd={handleAddBreak} 
+        />
       </View>
     );
   }
 
-  const displayList = optimizedRides.length > 0 ? optimizedRides : plannedRides;
+  const displayList = optimizedPlan.length > 0 ? optimizedPlan : [...plannedBreaks.map(b => ({...b, isBreak: true})), ...plannedRides];
 
   return (
     <View style={styles.container}>
+      <BreakModal 
+          isVisible={isModalVisible} 
+          onClose={() => setModalVisible(false)} 
+          onAdd={handleAddBreak} 
+        />
       {isOptimizing ? (
         <View style={styles.optimizingContainer}>
           <ActivityIndicator size="large" color={Colors.primary} />
@@ -197,26 +422,39 @@ export default function PlanScreen() {
               index={index} 
               isLast={index === displayList.length - 1} 
               removeRide={removeRide} 
+              removeBreak={removeBreak}
             />
           )}
           ListHeaderComponent={() => (
-            optimizedRides.length > 0 ? (
-              <View style={styles.statsBadge}>
-                <View style={styles.statsLeft}>
-                  <Ionicons name="flash" size={32} color={Colors.secondary} />
-                  <View>
-                    <Text style={styles.statsLabel}>SMART OPTIMIZATION</Text>
-                    <Text style={styles.statsTitle}>Itinerary Optimized</Text>
+            <View>
+              <TripSummaryCard tripDays={tripDays} />
+
+              {/* Add Breaks UI */}
+              <View style={styles.breaksContainer}>
+                <TouchableOpacity style={styles.addBreakButton} onPress={() => setModalVisible(true)}>
+                  <Ionicons name="add-circle-outline" size={20} color={Colors.onPrimary} />
+                  <Text style={styles.addBreakButtonText}>Schedule Custom Break</Text>
+                </TouchableOpacity>
+              </View>
+
+              {optimizedPlan.length > 0 && (
+                <View style={styles.statsBadge}>
+                  <View style={styles.statsLeft}>
+                    <Ionicons name="flash" size={32} color={Colors.secondary} />
+                    <View>
+                      <Text style={styles.statsLabel}>SMART OPTIMIZATION</Text>
+                      <Text style={styles.statsTitle}>Itinerary Optimized</Text>
+                    </View>
                   </View>
                 </View>
-              </View>
-            ) : null
+              )}
+            </View>
           )}
           ListFooterComponent={() => (
             <TouchableOpacity style={styles.updateButton} onPress={optimizePlan}>
               <Ionicons name="color-filter" size={20} color={Colors.onSecondaryContainer} />
               <Text style={styles.updateButtonText}>
-                {optimizedRides.length > 0 ? "Re-Optimize Itinerary" : "Optimize Itinerary"}
+                {optimizedPlan.length > 0 ? "Re-Optimize Itinerary" : "Optimize Itinerary"}
               </Text>
             </TouchableOpacity>
           )}
@@ -249,6 +487,33 @@ const styles = StyleSheet.create({
     color: Colors.outline,
     textAlign: 'center',
     marginTop: 8,
+  },
+  breaksContainer: {
+    marginBottom: 24,
+  },
+  breaksTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.onSurfaceVariant,
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  breakButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: Colors.surfaceContainerHigh,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant,
+  },
+  breakButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.primary,
   },
   optimizingContainer: {
     flex: 1,
@@ -298,6 +563,63 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     fontFamily: 'Georgia',
+  },
+
+  tripSummaryCard: {
+    backgroundColor: Colors.primaryContainer,
+    borderRadius: 18,
+    padding: 16,
+    marginTop: 24,
+    marginBottom: 24,
+    width: '100%',
+    shadowColor: Colors.secondaryContainer,
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 5,
+  },
+  tripSummaryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  tripSummaryLabel: {
+    color: Colors.onPrimaryContainer,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  tripSummaryTitle: {
+    color: Colors.onPrimary,
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: 'Georgia',
+    marginTop: 2,
+  },
+  tripDayPills: {
+    gap: 10,
+  },
+  tripDayPill: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minWidth: 145,
+  },
+  tripDayDate: {
+    color: Colors.onPrimaryContainer,
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  tripDayPark: {
+    color: Colors.secondaryContainer,
+    fontSize: 14,
+    fontWeight: '800',
   },
   statsRight: {
     backgroundColor: Colors.secondaryContainer,
@@ -450,5 +772,104 @@ const styles = StyleSheet.create({
     color: Colors.onSecondaryContainer,
     fontSize: 18,
     fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: Colors.surface,
+    borderRadius: 24,
+    padding: 24,
+    width: '100%',
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Colors.primary,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  pickerLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.onSurfaceVariant,
+    marginBottom: 8,
+    marginTop: 16,
+  },
+  pickerScroll: {
+    gap: 8,
+  },
+  pickerChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: Colors.surfaceContainerHigh,
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant,
+  },
+  pickerChipActive: {
+    backgroundColor: Colors.primaryContainer,
+    borderColor: Colors.primary,
+  },
+  pickerChipText: {
+    color: Colors.onSurfaceVariant,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  pickerChipTextActive: {
+    color: Colors.onPrimaryContainer,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 32,
+    gap: 16,
+  },
+  modalBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: 'center',
+  },
+  modalBtnCancel: {
+    backgroundColor: Colors.surfaceContainerHigh,
+  },
+  modalBtnAdd: {
+    backgroundColor: Colors.primary,
+  },
+  modalBtnCancelText: {
+    color: Colors.onSurface,
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  modalBtnAddText: {
+    color: Colors.onPrimary,
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  addBreakButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Colors.primaryContainer,
+    paddingVertical: 12,
+    borderRadius: 20,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: Colors.primaryFixedDim,
+  },
+  addBreakButtonText: {
+    color: Colors.onPrimaryContainer,
+    fontWeight: '600',
+    fontSize: 16,
   }
 });

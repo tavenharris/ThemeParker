@@ -1,6 +1,7 @@
-import { Tabs } from 'expo-router';
+import { Redirect, Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { View, Image, Text, StyleSheet } from 'react-native';
+import { useAuth } from '../../src/AuthContext';
+import { ActivityIndicator, View, Image, Text, StyleSheet } from 'react-native';
 
 const Colors = {
   primary: '#021541',
@@ -29,6 +30,20 @@ function TopHeader() {
 }
 
 export default function TabLayout() {
+  const { session, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+      </View>
+    );
+  }
+
+  if (!session) {
+    return <Redirect href="/login" />;
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: Colors.surface }}>
       <TopHeader />
@@ -52,7 +67,8 @@ export default function TabLayout() {
           fontWeight: '600',
           marginTop: 4,
           fontFamily: 'Georgia', // Using a built-in serif font for MVP
-        }
+        },
+        animation: 'shift',
       }}>
         <Tabs.Screen
           name="index"
@@ -76,12 +92,29 @@ export default function TabLayout() {
             ),
           }}
         />
+        <Tabs.Screen
+          name="settings"
+          options={{
+            title: 'Settings',
+            tabBarIcon: ({ color, focused }) => (
+              <View style={focused ? styles.activeTabIcon : styles.inactiveTabIcon}>
+                <Ionicons name="person-circle" size={24} color={color} />
+              </View>
+            ),
+          }}
+        />
       </Tabs>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surface,
+  },
   headerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
